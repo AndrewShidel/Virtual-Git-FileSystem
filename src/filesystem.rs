@@ -88,20 +88,25 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
 
 impl PassthroughFS {
     fn real_path(&self, partial: &Path) -> Result<OsString, i32> {
-        let real_path = PathBuf::from(&self.target)
-            .join(partial.strip_prefix("/").unwrap()).into_os_string().to_str().unwrap().to_string();
-        debug!("real path: {:?}", real_path);
+        //let real_path = PathBuf::from(&self.target)
+        //    .join(partial.strip_prefix("/").unwrap()).into_os_string().to_str().unwrap().to_string();
+        debug!("partial path: {:?}", partial);
         //match git::clone_if_not_exist(&real_path, String::from("/tmp/cache")) {
         //    Ok(s) => Ok(OsString::from(real_path)),
         //    Err(e) => Err(libc::ENOENT),
         //}
+        let partial = partial.strip_prefix("/").unwrap();
+
 
         match git::clone_if_not_exist(
-            &real_path,
+            partial.to_str().unwrap().to_string(),
             String::from("/tmp/cache")
         ) {
             Ok(s) => Ok(OsString::from(s)),
-            Err(_e) => Err(libc::EINVAL),
+            Err(e) => {
+                println!("clone err = {:?}", e);
+                Err(libc::EINVAL)
+            }
         }
     }
 
