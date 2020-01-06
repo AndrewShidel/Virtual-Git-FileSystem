@@ -88,19 +88,16 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
 
 impl PassthroughFS {
     fn real_path(&self, partial: &Path) -> Result<OsString, i32> {
-        //let real_path = PathBuf::from(&self.target)
-        //    .join(partial.strip_prefix("/").unwrap()).into_os_string().to_str().unwrap().to_string();
+        self.real_path_ignore_repo_base(partial, false)
+    }
+
+    fn real_path_ignore_repo_base(&self, partial: &Path, ignoreBase: bool) -> Result<OsString, i32> {
         debug!("partial path: {:?}", partial);
-        //match git::clone_if_not_exist(&real_path, String::from("/tmp/cache")) {
-        //    Ok(s) => Ok(OsString::from(real_path)),
-        //    Err(e) => Err(libc::ENOENT),
-        //}
         let partial = partial.strip_prefix("/").unwrap();
-
-
         match git::clone_if_not_exist(
             partial.to_str().unwrap().to_string(),
-            String::from("/tmp/cache")
+            String::from("/tmp/cache"),
+            ignoreBase,
         ) {
             Ok(s) => Ok(OsString::from(s)),
             Err(e) => {
@@ -111,7 +108,11 @@ impl PassthroughFS {
     }
 
     fn stat_real(&self, path: &Path) -> io::Result<FileAttr> {
-        let real = match self.real_path(path) {
+        self.stat_real_ignore_repo_base(path, false)
+    }
+
+    fn stat_real_ignore_repo_base(&self, path: &Path, ignoreBase: bool) -> io::Result<FileAttr> {
+        let real = match self.real_path_ignore_repo_base(path, ignoreBase) {
             Ok(p) => p,
             Err(e) => {
                 let err = io::Error::from_raw_os_error(e);
@@ -155,7 +156,7 @@ impl FilesystemMT for PassthroughFS {
                 Err(e) => Err(e)
             }
         } else {
-            match self.stat_real(path) {
+            match self.stat_real_ignore_repo_base(path, true) {
                 Ok(attr) => Ok((TTL, attr)),
                 Err(e) => Err(e.raw_os_error().unwrap())
             }
@@ -649,7 +650,7 @@ impl FilesystemMT for PassthroughFS {
     fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, size: u32) -> ResultXattr {
         debug!("getxattr: {:?} {:?} {}", path, name, size);
 
-        let real = self.real_path(path)?;
+        let real = self.real_path_ignore_repo_base(path, true)?;
 
         if size > 0 {
             let mut data = Vec::<u8>::with_capacity(size as usize);

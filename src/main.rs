@@ -28,7 +28,6 @@ static LOGGER: ConsoleLogger = ConsoleLogger;
 fn main() {
     log::set_logger(&LOGGER).unwrap();
     log::set_max_level(log::LevelFilter::Debug);
-
     let args: Vec<OsString> = env::args_os().collect();
 
     if args.len() != 3 {
