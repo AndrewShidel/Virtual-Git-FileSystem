@@ -8,6 +8,7 @@ mod libc_extras;
 mod libc_wrappers;
 mod filesystem;
 mod git;
+mod github;
 
 struct ConsoleLogger;
 
