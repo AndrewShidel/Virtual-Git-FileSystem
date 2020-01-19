@@ -1,5 +1,6 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::fs;
 
 #[macro_use]
 extern crate log;
@@ -32,8 +33,13 @@ fn main() {
     let args: Vec<OsString> = env::args_os().collect();
 
     if args.len() != 3 {
-        println!("usage: {} <target> <mountpoint>", &env::args().next().unwrap());
-        ::std::process::exit(-1);
+        eprintln!("usage: {} <target> <mountpoint>", &env::args().next().unwrap());
+        ::std::process::exit(1);
+    }
+    let github_repo = format!("{:?}/repos/github.com", args[1]);
+    if let Err(e) = fs::create_dir_all(github_repo) {
+        eprintln!("unable to create cache directory: {}", e);
+        ::std::process::exit(1);
     }
 
     let filesystem = filesystem::PassthroughFS {

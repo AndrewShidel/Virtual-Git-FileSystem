@@ -35,7 +35,7 @@ pub fn user_info(user: &str) -> Option<serde_json::value::Value> {
     }
 }
 
-pub fn fill_user_repos(user: &str) {
+pub fn fill_user_repos(path: &str, user: &str) {
     let info = user_info(user);
     if info.is_none() {
         return;
@@ -53,7 +53,7 @@ pub fn fill_user_repos(user: &str) {
         for e in json.as_array().unwrap() {
             let name = e["name"].as_str().unwrap();
             println!("Name: {}", name);
-            fs::create_dir(format!("/tmp/users/{}/{}", user, name));
+            fs::create_dir(format!("{}/{}", path, name));
         }
     }
 }
