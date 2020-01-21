@@ -5,6 +5,7 @@ use std::path::{Path};
 use tempdir::TempDir;
 use crate::github;
 use std::fs;
+use chrono::Utc;
 
 pub fn clone_if_not_exist(repo_path: String, cache_dir: String, ignoreBase: bool) -> Result<String, std::io::Error> {
     let parts: Vec<&str> = repo_path.split("/").collect();
@@ -51,6 +52,7 @@ pub fn clone_if_not_exist(repo_path: String, cache_dir: String, ignoreBase: bool
     if Path::new(&real_repo_path).exists() {
         return Ok(real_file_path)
     }
+    github::latest_commit_since(parts[1], parts[2], Utc::now());
     match RepoBuilder::new().clone(&url, Path::new(&real_repo_path)) {
         Ok(_r) => Ok(real_file_path),
         Err(e) => Err(std::io::Error::new(std::io::ErrorKind::NotFound, e))

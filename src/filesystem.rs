@@ -166,11 +166,11 @@ impl FilesystemMT for PassthroughFS {
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
         let real = self.real_path(path)?;
         debug!("opendir: {:?} (flags = {:#o})", real, _flags);
-        match libc_wrappers::opendir(real) {
+        match libc_wrappers::opendir(real.clone()) {
             Ok(fh) => Ok((fh, 0)),
             Err(e) => {
                 let ioerr = io::Error::from_raw_os_error(e);
-                error!("opendir({:?}): {}", path, ioerr);
+                error!("opendir({:?}): {}", real, ioerr);
                 Err(e)
             }
         }
