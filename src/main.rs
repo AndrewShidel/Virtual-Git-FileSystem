@@ -36,7 +36,7 @@ fn main() {
         eprintln!("usage: {} <target> <mountpoint>", &env::args().next().unwrap());
         ::std::process::exit(1);
     }
-    let github_repo = format!("{:?}/repos/github.com", args[1]);
+    let github_repo = format!("{}/repos/github.com", args[1].to_str().unwrap());
     if let Err(e) = fs::create_dir_all(github_repo) {
         eprintln!("unable to create cache directory: {}", e);
         ::std::process::exit(1);
