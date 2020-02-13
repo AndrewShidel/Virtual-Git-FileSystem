@@ -42,9 +42,7 @@ fn main() {
         ::std::process::exit(1);
     }
 
-    let filesystem = filesystem::PassthroughFS {
-        target: args[1].clone(),
-    };
+    let filesystem = filesystem::PassthroughFS::new(args[1].clone());
 
     let fuse_args: Vec<&OsStr> = vec![&OsStr::new("-o"), &OsStr::new("auto_unmount")];
 

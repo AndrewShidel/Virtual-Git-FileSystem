@@ -14,13 +14,21 @@ use std::path::{Path, PathBuf};
 
 use crate::libc_extras::libc;
 use crate::libc_wrappers;
-use crate::git;
+use crate::git::{GitFS};
 
 use fuse_mt::*;
 use time::*;
+use std::borrow::BorrowMut;
+
+use lazy_static::lazy_static; // 1.4.0
+use std::sync::Mutex;
+
+lazy_static! {
+    static ref GIT: Mutex<GitFS> = Mutex::new(GitFS::new());
+}
 
 pub struct PassthroughFS {
-    pub target: OsString,
+    target: OsString,
 }
 
 fn mode_to_filetype(mode: libc::mode_t) -> FileType {
@@ -87,17 +95,23 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
 }
 
 impl PassthroughFS {
+    pub fn new(target: OsString) -> PassthroughFS {
+        PassthroughFS{target}
+    }
     fn real_path(&self, partial: &Path) -> Result<OsString, i32> {
-        self.real_path_ignore_repo_base(partial, false)
+        self.real_path_with_opts(partial, false, true)
     }
 
-    fn real_path_ignore_repo_base(&self, partial: &Path, ignoreBase: bool) -> Result<OsString, i32> {
+    fn real_path_with_opts(&self, partial: &Path, ignore_base: bool, is_stat: bool) -> Result<OsString, i32> {
         debug!("partial path: {:?}", partial);
         let partial = partial.strip_prefix("/").unwrap();
-        match git::clone_if_not_exist(
+        // TODO: Is an unlock needed?
+        let mut git = GIT.lock().unwrap();
+        match git.clone_if_not_exist(
             partial.to_str().unwrap().to_string(),
             String::from("/tmp/cache"),
-            ignoreBase,
+            ignore_base,
+            is_stat,
         ) {
             Ok(s) => Ok(OsString::from(s)),
             Err(e) => {
@@ -108,11 +122,11 @@ impl PassthroughFS {
     }
 
     fn stat_real(&self, path: &Path) -> io::Result<FileAttr> {
-        self.stat_real_ignore_repo_base(path, false)
+        self.stat_real_with_opts(path, false, true)
     }
 
-    fn stat_real_ignore_repo_base(&self, path: &Path, ignoreBase: bool) -> io::Result<FileAttr> {
-        let real = match self.real_path_ignore_repo_base(path, ignoreBase) {
+    fn stat_real_with_opts(&self, path: &Path, ignore_base: bool, is_stat: bool) -> io::Result<FileAttr> {
+        let real = match self.real_path_with_opts(path, ignore_base, is_stat) {
             Ok(p) => p,
             Err(e) => {
                 let err = io::Error::from_raw_os_error(e);
@@ -156,7 +170,7 @@ impl FilesystemMT for PassthroughFS {
                 Err(e) => Err(e)
             }
         } else {
-            match self.stat_real_ignore_repo_base(path, true) {
+            match self.stat_real_with_opts(path, true, true) {
                 Ok(attr) => Ok((TTL, attr)),
                 Err(e) => Err(e.raw_os_error().unwrap())
             }
@@ -164,7 +178,7 @@ impl FilesystemMT for PassthroughFS {
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
-        let real = self.real_path(path)?;
+        let real = self.real_path_with_opts(path, false, false)?;
         debug!("opendir: {:?} (flags = {:#o})", real, _flags);
         match libc_wrappers::opendir(real.clone()) {
             Ok(fh) => Ok((fh, 0)),
@@ -240,7 +254,7 @@ impl FilesystemMT for PassthroughFS {
     fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
         debug!("open: {:?} flags={:#x}", path, flags);
 
-        let real = self.real_path(path)?;
+        let real = self.real_path_with_opts(path, true, false)?;
         match libc_wrappers::open(real, flags as libc::c_int) {
             Ok(fh) => Ok((fh, flags)),
             Err(e) => {
@@ -332,7 +346,7 @@ impl FilesystemMT for PassthroughFS {
         let result = if let Some(fh) = fh {
             unsafe { libc::fchmod(fh as libc::c_int, mode as libc::mode_t) }
         } else {
-            let real = self.real_path(path)?;
+            let real = self.real_path_with_opts(path, true, false)?;
             unsafe {
                 let path_c = CString::from_vec_unchecked(real.into_vec());
                 libc::chmod(path_c.as_ptr(), mode as libc::mode_t)
@@ -356,7 +370,7 @@ impl FilesystemMT for PassthroughFS {
         let result = if let Some(fd) = fh {
             unsafe { libc::fchown(fd as libc::c_int, uid, gid) }
         } else {
-            let real = self.real_path(path)?;
+            let real = self.real_path_with_opts(path, true, false)?;
             unsafe {
                 let path_c = CString::from_vec_unchecked(real.into_vec());
                 libc::chown(path_c.as_ptr(), uid, gid)
@@ -378,7 +392,7 @@ impl FilesystemMT for PassthroughFS {
         let result = if let Some(fd) = fh {
             unsafe { libc::ftruncate64(fd as libc::c_int, size as i64) }
         } else {
-            let real = self.real_path(path)?;
+            let real = self.real_path_with_opts(path, true, false)?;
             unsafe {
                 let path_c = CString::from_vec_unchecked(real.into_vec());
                 libc::truncate64(path_c.as_ptr(), size as i64)
@@ -436,7 +450,7 @@ impl FilesystemMT for PassthroughFS {
     fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
         debug!("readlink: {:?}", path);
 
-        let real = self.real_path(path)?;
+        let real = self.real_path_with_opts(path, true, false)?;
         match ::std::fs::read_link(real) {
             Ok(target) => Ok(target.into_os_string().into_vec()),
             Err(e) => Err(e.raw_os_error().unwrap()),
@@ -479,7 +493,6 @@ impl FilesystemMT for PassthroughFS {
     fn mknod(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, mode: u32, rdev: u32) -> ResultEntry {
         debug!("mknod: {:?}/{:?} (mode={:#o}, rdev={})", parent_path, name, mode, rdev);
 
-        //let real = PathBuf::from(self.real_path(parent_path)).join(name)?;
         let mut real = self.real_path(parent_path)?;
         real.push("/");
         real.push(name);
@@ -549,7 +562,7 @@ impl FilesystemMT for PassthroughFS {
     fn symlink(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, target: &Path) -> ResultEntry {
         debug!("symlink: {:?}/{:?} -> {:?}", parent_path, name, target);
 
-        let real = PathBuf::from(self.real_path(parent_path)?).join(name);
+        let real = PathBuf::from(self.real_path_with_opts(parent_path, false, false)?).join(name);
         match ::std::os::unix::fs::symlink(target, &real) {
             Ok(()) => {
                 match libc_wrappers::lstat(real.clone().into_os_string()) {
@@ -567,6 +580,7 @@ impl FilesystemMT for PassthroughFS {
         }
     }
 
+    // TODO: After rename if you try to fetch the original paths contents what happens?
     fn rename(&self, _req: RequestInfo, parent_path: &Path, name: &OsStr, newparent_path: &Path, newname: &OsStr) -> ResultEmpty {
         debug!("rename: {:?}/{:?} -> {:?}/{:?}", parent_path, name, newparent_path, newname);
 
@@ -582,8 +596,8 @@ impl FilesystemMT for PassthroughFS {
     fn link(&self, _req: RequestInfo, path: &Path, newparent: &Path, newname: &OsStr) -> ResultEntry {
         debug!("link: {:?} -> {:?}/{:?}", path, newparent, newname);
 
-        let real = self.real_path(path)?;
-        let newreal = PathBuf::from(self.real_path(newparent)?).join(newname);
+        let real = self.real_path_with_opts(path, false, false)?;
+        let newreal = PathBuf::from(self.real_path_with_opts(newparent, false, false)?).join(newname);
         match fs::hard_link(&real, &newreal) {
             Ok(()) => {
                 match libc_wrappers::lstat(real.clone()) {
@@ -604,7 +618,7 @@ impl FilesystemMT for PassthroughFS {
     fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, flags: u32) -> ResultCreate {
         debug!("create: {:?}/{:?} (mode={:#o}, flags={:#x})", parent, name, mode, flags);
 
-        let real = PathBuf::from(self.real_path(parent)?).join(name);
+        let real = PathBuf::from(self.real_path_with_opts(parent, true, false)?).join(name);
         let fd = unsafe {
             let real_c = CString::from_vec_unchecked(real.clone().into_os_string().into_vec());
             libc::open(real_c.as_ptr(), flags as i32 | libc::O_CREAT | libc::O_EXCL, mode)
@@ -650,7 +664,7 @@ impl FilesystemMT for PassthroughFS {
     fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, size: u32) -> ResultXattr {
         debug!("getxattr: {:?} {:?} {}", path, name, size);
 
-        let real = self.real_path_ignore_repo_base(path, true)?;
+        let real = self.real_path_with_opts(path, true, true)?;
 
         if size > 0 {
             let mut data = Vec::<u8>::with_capacity(size as usize);
