@@ -125,6 +125,7 @@ impl GithubFS {
 
         match self.latest_commit_since(user, repo, end_time) {
             Some(latest_commit) => {
+                self.get_repo_or_create(repo).timestamp_to_sha = Some((end_time, latest_commit.clone()));
                 self.create_fake_listing(user, repo, &latest_commit, repo_dir, cache_dir);
             },
             None => {
