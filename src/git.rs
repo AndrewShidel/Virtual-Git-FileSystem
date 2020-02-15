@@ -5,15 +5,19 @@ use std::path::{Path};
 use tempdir::TempDir;
 use crate::github::{GithubFS};
 use std::fs;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 pub struct GitFS {
     github: GithubFS,
+    timestamp: DateTime<Utc>,
 }
 
 impl GitFS {
     pub fn new() -> GitFS {
-        GitFS{github: GithubFS::new()}
+        GitFS{
+            github: GithubFS::new(),
+            timestamp: Utc::now(),
+        }
     }
     pub fn clone_if_not_exist(&mut self, repo_path: String, cache_dir: String, ignore_base: bool, is_stat: bool) -> Result<String, std::io::Error> {
         let parts: Vec<&str> = repo_path.split("/").collect();
@@ -61,7 +65,7 @@ impl GitFS {
         if is_stat {
             let repo_parent = Path::new(&path_in_repo).parent().unwrap_or(Path::new("/")).to_str().unwrap();
             if !self.github.is_structure_cloned(parts[2], repo_parent) {
-                self.github.clone_dir(repo_parent, &real_repo_path, parts[1], parts[2], Utc::now());
+                self.github.clone_dir(repo_parent, &real_repo_path, parts[1], parts[2], self.timestamp);
             }
             return Ok(real_file_path)
         }
@@ -69,7 +73,7 @@ impl GitFS {
             return Ok(real_file_path)
         }
         // TODO: If the path is in ".git" discard existing cache and do a fresh clone.
-        self.github.clone_dir(&path_in_repo, &real_repo_path, parts[1], parts[2], Utc::now());
+        self.github.clone_dir(&path_in_repo, &real_repo_path, parts[1], parts[2], self.timestamp);
         Ok(real_file_path)
         //match RepoBuilder::new().clone(&url, Path::new(&real_repo_path)) {
         //    Ok(_r) => Ok(real_file_path),

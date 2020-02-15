@@ -82,6 +82,7 @@ struct Repo {
     // Maps a (directory, commit sha) to a tree sha.
     tree: HashMap<(String, String), String>,
     clonedStructures: HashSet<String>,
+    timestamp_to_sha: Option<(DateTime<Utc>, String)>,
 }
 
 pub struct GithubFS {
@@ -95,10 +96,11 @@ impl GithubFS {
     }
 
     fn get_repo_or_create(&mut self, repo_name: &str) -> &mut Repo {
-        //if self.repos.contains_key(repo_name) {
-        //    self.repos.get
-        //}
-        self.repos.entry(repo_name.to_string()).or_insert_with(|| Repo{tree: HashMap::new(), clonedStructures: HashSet::new()})
+        self.repos.entry(repo_name.to_string()).or_insert_with(|| Repo{
+            tree: HashMap::new(),
+            clonedStructures: HashSet::new(),
+            timestamp_to_sha: None,
+        })
     }
 
     pub fn is_structure_cloned(&self, repo: &str, repo_dir: &str) -> bool {
@@ -111,8 +113,16 @@ impl GithubFS {
 
     // Clones a specific directory inside of a repo, saving the empty files to the cache.
     pub fn clone_dir(&mut self, repo_dir: &str, cache_dir: &str, user: &str, repo: &str, end_time: DateTime<Utc>) {
+        // TODO: Do not create dirs that do not exist.
         fs::create_dir_all(cache_dir);
-        // TODO: Cache commits.
+        match self.get_repo_or_create(repo).timestamp_to_sha.clone() {
+            Some((timestamp, sha)) => {
+                self.create_fake_listing(user, repo, &sha, repo_dir, cache_dir);
+                return
+            },
+            None => {},
+        }
+
         match self.latest_commit_since(user, repo, end_time) {
             Some(latest_commit) => {
                 self.create_fake_listing(user, repo, &latest_commit, repo_dir, cache_dir);
