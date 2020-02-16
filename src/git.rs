@@ -19,6 +19,11 @@ impl GitFS {
             timestamp: Utc::now(),
         }
     }
+
+    pub fn set_token(&mut self, token: String) {
+        self.github.token = token;
+    }
+
     pub fn clone_if_not_exist(&mut self, repo_path: String, cache_dir: String, ignore_base: bool, is_stat: bool) -> Result<String, std::io::Error> {
         let parts: Vec<&str> = repo_path.split("/").collect();
         println!("repo_path: {}, parts: {:?}", repo_path, parts);

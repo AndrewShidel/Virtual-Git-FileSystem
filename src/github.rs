@@ -1,4 +1,3 @@
-use github_rs::client::{Executor, Github};
 use serde_json::Value;
 use std::borrow::{Borrow, BorrowMut};
 use std::fs;
@@ -16,59 +15,7 @@ use std::hash::Hash;
 use std::path::Path;
 use base64;
 use std::io;
-
-
-fn api_call(endpoint: &str) -> Option<serde_json::value::Value> {
-    println!("Running {}", endpoint);
-    let client = Github::new("e6bc4bdc7e065da2041510946d921ac961094f3d").unwrap();
-    let response = client
-        .get()
-        .custom_endpoint(&endpoint)
-        .execute::<Value>();
-    match response {
-        Ok((_, status, json)) => {
-            println!("Status {}", status);
-            if let Some(json) = &json {
-                println!("{}", json);
-            }
-            if !status.is_success() {
-                println!("Status is not success");
-                return None;
-            }
-            return json;
-        },
-        Err(e) => {
-            println!("GitHub Error {}", e);
-            return None;
-        }
-    }
-}
-
-fn api_call_request(endpoint: &str) -> Option<serde_json::value::Value> {
-    let url = format!("https://api.github.com/{}", &endpoint) ;
-    println!("Request {}", url);
-    let client = reqwest::blocking::Client::new();
-    let response = client.get(&url).header(reqwest::header::USER_AGENT, "Virtual Git Filesystem").send();
-    //let response = reqwest::blocking::get(&url);
-    match response {
-        Ok(res) => {
-            let json_str = res.text().unwrap();
-            match serde_json::from_str(&json_str) {
-                Ok(json) => {
-                    Some(json)
-                },
-                Err(e) => {
-                    eprintln!("Error parsing JSON for {}: {}, JSON={}", endpoint, e, &json_str);
-                    None
-                }
-            }
-        },
-        Err(e) => {
-            eprintln!("API error for {}: {}", endpoint, e);
-            None
-        },
-    }
-}
+use http;
 
 fn download(remote_path: &str, local_path: &str) -> Result<(), Box<std::error::Error>> {
     let mut resp = reqwest::blocking::get(remote_path)?;
@@ -88,11 +35,12 @@ struct Repo {
 pub struct GithubFS {
     // Maps a repo name to a repo.
     repos: HashMap<String, Repo>,
+    pub token: String,
 }
 
 impl GithubFS {
     pub fn new() -> GithubFS {
-        GithubFS{repos: HashMap::new()}
+        GithubFS{repos: HashMap::new(), token: "".to_string()}
     }
 
     fn get_repo_or_create(&mut self, repo_name: &str) -> &mut Repo {
@@ -117,12 +65,13 @@ impl GithubFS {
         fs::create_dir_all(cache_dir);
         match self.get_repo_or_create(repo).timestamp_to_sha.clone() {
             Some((timestamp, sha)) => {
+                println!("Already has timestamp");
                 self.create_fake_listing(user, repo, &sha, repo_dir, cache_dir);
                 return
             },
             None => {},
         }
-
+        println!("Getting timestamp");
         match self.latest_commit_since(user, repo, end_time) {
             Some(latest_commit) => {
                 self.get_repo_or_create(repo).timestamp_to_sha = Some((end_time, latest_commit.clone()));
@@ -139,7 +88,7 @@ impl GithubFS {
     fn latest_commit_since(&self, user: &str, repo: &str, end_time: DateTime<Utc>) -> Option<String> {
         let since = Utc::now().checked_sub_signed(Duration::days(10000)).unwrap();
         let endpoint = format!("repos/{}/{}/commits?since={}&until={}", user, repo, since.to_rfc3339(), end_time.to_rfc3339());
-        let res = api_call(&endpoint);
+        let res = self.api_call_request(&endpoint);
         if res.is_none() {
             return None
         }
@@ -151,13 +100,12 @@ impl GithubFS {
     }
 
     fn create_fake_listing(&mut self, user: &str, repo_name: &str, commit_sha: &str, repo_dir: &str, cache_dir: &str) {
-        let mut repo = self.get_repo_or_create(repo_name);
-        repo.clonedStructures.insert(repo_dir.to_string());
         // Note: This will only get the root of the repo.
-        let res = api_call_request(&format!("repos/{}/{}/contents/{}?ref={}", user, repo_name, repo_dir, commit_sha));
+        let res = self.api_call_request(&format!("repos/{}/{}/contents/{}?ref={}", user, repo_name, repo_dir, commit_sha));
         let tree_json = res.unwrap();
         //if let Some(tree_json) = res {
         println!("tree_json: {}", tree_json);
+        let mut repo = self.get_repo_or_create(repo_name);
         if tree_json.is_object() {
             let is_msg_null = tree_json["message"].is_null();
             if !is_msg_null {
@@ -172,7 +120,8 @@ impl GithubFS {
             let download_url = tree_json["download_url"].as_str().unwrap();
             match download(download_url, &path_str) {
                 Ok(_) => {
-                    println!("Downloaded file {} to {}", download_url, &path_str);
+                    println!("    Downloaded file {} to {}", download_url, &path_str);
+                    repo.clonedStructures.insert(repo_dir.to_string());
                 },
                 Err(e) => {
                     println!("Error downloading file: {}", e);
@@ -195,6 +144,7 @@ impl GithubFS {
                     let tree_sha = node_json["sha"].as_str().unwrap().to_string();
                     repo.tree.insert((repo_dir.to_string(), commit_sha.to_string()), tree_sha);
                     fs::create_dir_all(format!("{}/{}", cache_dir, node_json["path"].as_str().unwrap()));
+                    repo.clonedStructures.insert(repo_dir.to_string());
                 },
                 _ => {
                     println!("Unknown type: {}", node_json["type"])
@@ -209,7 +159,7 @@ impl GithubFS {
 
     fn user_info(&self, user: &str) -> Option<serde_json::value::Value> {
         let repos_endpoint = format!("users/{}/repos", user);
-        return api_call(&repos_endpoint);
+        return self.api_call_request(&repos_endpoint);
     }
 
     // Creates the repo directories in the cache for a given user.
@@ -220,8 +170,6 @@ impl GithubFS {
             return;
         }
         let json = info.unwrap();
-        //if let Some(json) = info {
-        println!("JSON: {}", json);
         if json.is_array() {
             println!("Is an array");
         } else if json.is_object() {
@@ -235,6 +183,31 @@ impl GithubFS {
             println!("Name: {}", name);
             fs::create_dir(format!("{}/{}", path, name));
         }
-        //}
+    }
+
+    fn api_call_request(&self, endpoint: &str) -> Option<serde_json::value::Value> {
+        let url = format!("https://api.github.com/{}", &endpoint) ;
+        println!("Request {}", url);
+        let client = reqwest::blocking::Client::new();
+        let response = client.get(&url).header(reqwest::header::USER_AGENT, "Virtual Git Filesystem").header("Authorization", format!("token {}", self.token)).send();
+        //let response = reqwest::blocking::get(&url);
+        match response {
+            Ok(res) => {
+                let json_str = res.text().unwrap();
+                match serde_json::from_str(&json_str) {
+                    Ok(json) => {
+                        Some(json)
+                    },
+                    Err(e) => {
+                        eprintln!("Error parsing JSON for {}: {}, JSON={}", endpoint, e, &json_str);
+                        None
+                    }
+                }
+            },
+            Err(e) => {
+                eprintln!("API error for {}: {}", endpoint, e);
+                None
+            },
+        }
     }
 }

@@ -95,7 +95,9 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
 }
 
 impl PassthroughFS {
-    pub fn new(target: OsString) -> PassthroughFS {
+    pub fn new(target: OsString, token: String) -> PassthroughFS {
+        let mut git = GIT.lock().unwrap();
+        git.set_token(token);
         PassthroughFS{target}
     }
     fn real_path(&self, partial: &Path) -> Result<OsString, i32> {
@@ -255,6 +257,7 @@ impl FilesystemMT for PassthroughFS {
         debug!("open: {:?} flags={:#x}", path, flags);
 
         let real = self.real_path_with_opts(path, true, false)?;
+        println!("    Real open path is {}", real.to_str().unwrap());
         match libc_wrappers::open(real, flags as libc::c_int) {
             Ok(fh) => Ok((fh, flags)),
             Err(e) => {

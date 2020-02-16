@@ -5,11 +5,16 @@ use std::fs;
 #[macro_use]
 extern crate log;
 
+#[macro_use]
+extern crate rouille;
+
 mod libc_extras;
 mod libc_wrappers;
 mod filesystem;
 mod git;
 mod github;
+mod oauth;
+//mod oauth2;
 
 struct ConsoleLogger;
 
@@ -30,6 +35,7 @@ static LOGGER: ConsoleLogger = ConsoleLogger;
 fn main() {
     log::set_logger(&LOGGER).unwrap();
     log::set_max_level(log::LevelFilter::Debug);
+    let token = oauth::get_token().unwrap();
     let args: Vec<OsString> = env::args_os().collect();
 
     if args.len() != 3 {
@@ -42,7 +48,7 @@ fn main() {
         ::std::process::exit(1);
     }
 
-    let filesystem = filesystem::PassthroughFS::new(args[1].clone());
+    let filesystem = filesystem::PassthroughFS::new(args[1].clone(), token);
 
     let fuse_args: Vec<&OsStr> = vec![&OsStr::new("-o"), &OsStr::new("auto_unmount")];
 
