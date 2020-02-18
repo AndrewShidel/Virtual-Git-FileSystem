@@ -107,6 +107,11 @@ impl GithubFS {
         for node_json in tree_json.as_array()? {
             match node_json["type"].as_str() {
                 Some("file") => {
+                    let path = node_json["path"].as_str()?;
+                    if repo.cloned_structures.contains(path) {
+                        println!("Skipping already cloned file: {}", path);
+                        continue;
+                    }
                     let mut file = File::create(format!("{}/{}", cache_dir, node_json["path"].as_str()?))?;
                     let f_size = node_json["size"].as_i64()?;
                     //file.write_all(&[0u8; node_json["size"].as_i64()?]);
