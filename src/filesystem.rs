@@ -1,9 +1,4 @@
-// PassthroughFS :: A filesystem that passes all calls through to another underlying filesystem.
-//
-// Implemented using fuse_mt::FilesystemMT.
-//
-// Copyright (c) 2016-2019 by William R. Fraser
-//
+// The main entry point to the Virtual Git Filesystem.
 
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs::{self, File};
