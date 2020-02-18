@@ -1,11 +1,13 @@
 extern crate tempdir;
 
-use git2::build::{RepoBuilder};
+// TODO: Uncomment this when adding support for non-Github repos.
+//use git2::build::{RepoBuilder};
 use std::path::{Path};
-use tempdir::TempDir;
 use crate::github::{GithubFS};
 use std::fs;
 use chrono::{DateTime, Utc};
+use crate::error::{Result, GitFSError};
+use crate::libc_extras::libc;
 
 pub struct GitFS {
     github: GithubFS,
@@ -24,7 +26,7 @@ impl GitFS {
         self.github.token = token;
     }
 
-    pub fn clone_if_not_exist(&mut self, repo_path: String, cache_dir: String, ignore_base: bool, is_stat: bool) -> Result<String, std::io::Error> {
+    pub fn clone_if_not_exist(&mut self, repo_path: String, cache_dir: String, ignore_base: bool, is_stat: bool) -> Result<String> {
         let parts: Vec<&str> = repo_path.split("/").collect();
         println!("repo_path: {}, parts: {:?}", repo_path, parts);
         if parts.len() == 1 {
@@ -35,13 +37,13 @@ impl GitFS {
             }
         }
         if parts.len() > 0 && parts[0] != "github.com" {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Not Found"));
+            return Err(GitFSError::new("Not Found", libc::ENOENT))
         }
         if parts.len() == 2 {
             let path = format!("{}/repos/github.com/{}", cache_dir, parts[1]);
             if !Path::new(&path).exists() {
-                fs::create_dir(&path);
-                self.github.fill_user_repos(&path, parts[1]);
+                fs::create_dir(&path)?;
+                self.github.fill_user_repos(&path, parts[1])?;
             }
             return Ok(path);
         }
@@ -59,18 +61,18 @@ impl GitFS {
         if ignore_base && parts.len() == 3 {
             // Give it a temporary directory so that it can display metadata for the directory without
             // the need to create the real one.
-            let tmpPath = format!("{}/fake_repos/github.com/{}/{}", cache_dir, parts[1], parts[2]);
-            fs::create_dir_all(tmpPath.clone());
-            return Ok(tmpPath);
+            let tmp_path = format!("{}/fake_repos/github.com/{}/{}", cache_dir, parts[1], parts[2]);
+            fs::create_dir_all(tmp_path.clone())?;
+            return Ok(tmp_path);
         }
 
         let url = "https://".to_owned() + parts[0..3].join("/").as_str() + ".git";
-        println!("Final URL: {:?}", url);
+        println!("Final Repo URL: {:?}", url);
         // If all we need is metadata about the file/directory, then it is sufficient to just clone the parent directory.
         if is_stat {
-            let repo_parent = Path::new(&path_in_repo).parent().unwrap_or(Path::new("/")).to_str().unwrap();
+            let repo_parent = Path::new(&path_in_repo).parent().unwrap_or(Path::new("/")).to_str()?;
             if !self.github.is_structure_cloned(parts[2], repo_parent) {
-                self.github.clone_dir(repo_parent, &real_repo_path, parts[1], parts[2], self.timestamp);
+                self.github.clone_dir(repo_parent, &real_repo_path, parts[1], parts[2], self.timestamp)?;
             }
             return Ok(real_file_path)
         }
@@ -78,7 +80,7 @@ impl GitFS {
             return Ok(real_file_path)
         }
         // TODO: If the path is in ".git" discard existing cache and do a fresh clone.
-        self.github.clone_dir(&path_in_repo, &real_repo_path, parts[1], parts[2], self.timestamp);
+        self.github.clone_dir(&path_in_repo, &real_repo_path, parts[1], parts[2], self.timestamp)?;
         Ok(real_file_path)
         //match RepoBuilder::new().clone(&url, Path::new(&real_repo_path)) {
         //    Ok(_r) => Ok(real_file_path),

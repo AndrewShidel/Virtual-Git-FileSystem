@@ -12,12 +12,12 @@ fn get_redirect_code() -> String {
     let (code_sender, code_receiver): (Sender<String>, Receiver<String>) = mpsc::channel();
     let sender_wrapped: Mutex<Sender<String>> = Mutex::new(code_sender);
     // 35918 is the port specified for the Github OAuth callback. Generated with RNG.
-    let mut server = rouille::Server::new("localhost:35918", move |request| {
+    let server = rouille::Server::new("localhost:35918", move |request| {
         router!(request,
             (GET) (/) => {
                 let code = request.get_param("code").unwrap();
                 println!("Sending code: {}", &code);
-                sender_wrapped.lock().unwrap().send(code);
+                sender_wrapped.lock().unwrap().send(code).unwrap();
                 println!("Code sent");
                 rouille::Response::text(format!("You are now authenticated and can use Virtual Git Filesystem."))
             },
@@ -38,8 +38,6 @@ fn get_redirect_code() -> String {
         }
         server.poll();
     }
-    // This should never be reached.
-    String::new()
 }
 
 fn exchange_for_token(code: String) -> String {
@@ -66,13 +64,13 @@ pub fn get_token() -> Option<String> {
         Ok(token) => {
             return Some(token);
         },
-        Err(e) => {
+        Err(_) => {
             println!("No Github token found. Starting OAuth flow.")
         }
     }
     let code = get_redirect_code();
     println!("Code was returned: {}", &code);
     let token = exchange_for_token(code);
-    fs::write(token_file, &token);
+    fs::write(token_file, &token).unwrap();
     Some(token)
 }

@@ -18,7 +18,6 @@ use crate::git::{GitFS};
 
 use fuse_mt::*;
 use time::*;
-use std::borrow::BorrowMut;
 
 use lazy_static::lazy_static; // 1.4.0
 use std::sync::Mutex;
@@ -27,9 +26,7 @@ lazy_static! {
     static ref GIT: Mutex<GitFS> = Mutex::new(GitFS::new());
 }
 
-pub struct PassthroughFS {
-    target: OsString,
-}
+pub struct PassthroughFS {}
 
 fn mode_to_filetype(mode: libc::mode_t) -> FileType {
     match mode & libc::S_IFMT {
@@ -95,10 +92,10 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
 }
 
 impl PassthroughFS {
-    pub fn new(target: OsString, token: String) -> PassthroughFS {
+    pub fn new(token: String) -> PassthroughFS {
         let mut git = GIT.lock().unwrap();
         git.set_token(token);
-        PassthroughFS{target}
+        PassthroughFS{}
     }
     fn real_path(&self, partial: &Path) -> Result<OsString, i32> {
         self.real_path_with_opts(partial, false, true)
@@ -118,13 +115,9 @@ impl PassthroughFS {
             Ok(s) => Ok(OsString::from(s)),
             Err(e) => {
                 println!("clone err = {:?}", e);
-                Err(libc::EINVAL)
+                Err(e.code())
             }
         }
-    }
-
-    fn stat_real(&self, path: &Path) -> io::Result<FileAttr> {
-        self.stat_real_with_opts(path, false, true)
     }
 
     fn stat_real_with_opts(&self, path: &Path, ignore_base: bool, is_stat: bool) -> io::Result<FileAttr> {
