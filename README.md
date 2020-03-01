@@ -5,7 +5,7 @@ VG (**V**irtual **G**it filesystem) presents git repositories as files/directori
 These instructions assume that you have rust installed and are running on Debian, Ubuntu, or a similar operating system. VG should work for all/most versions of Linux, however they have not yet been tested.
 
 1. Run all of the apt commands in `apt_deps.sh`.
-2. `cargo run <cache_dir> <mountpoint>`
+2. `cargo run <cache_dir> <mountpoint>` using the rust nightly release.
 
 Where `cache_dir` is the directory to store cached files and directories and `mountpoint` is the directory to mount the filesystem. `cache_dir` will be created for you if needed, but `mountpoint` must be created ahead of time.
 
