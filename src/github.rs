@@ -78,8 +78,15 @@ impl GithubFS {
         let since = Utc::now().sub(Duration::days(10000));
         let endpoint = format!("repos/{}/{}/commits?since={}&until={}", user, repo, since.to_rfc3339(), end_time.to_rfc3339());
         let json = self.api_call_request(&endpoint)?;
+        if !json.is_array() {
+            if json.is_object() && json["message"].as_str()? == "Not Found" {
+                return Err(GitFSError::new("Not Found", libc::ENOENT));
+            }
+            eprintln!("Invalid type for JSON result: {}", json);
+            return Err(GitFSError::new("Invalid JSON", libc::EINVAL));
+        }
         // JSON elements will be sorted by most recent to least recent.
-        let most_recent_commit = &json.as_array().unwrap()[0];
+        let most_recent_commit = &json.as_array()?[0];
         return Ok(most_recent_commit["sha"].as_str().map(String::from)?);
     }
 
@@ -100,7 +107,7 @@ impl GithubFS {
             let download_url = tree_json["download_url"].as_str()?;
             download(download_url, &path_str)?;
             println!("Downloaded file {} to {}", download_url, &path_str);
-            repo.cloned_structures.insert(repo_dir.to_string());
+            repo.cloned_structures.insert(tree_json["path"].as_str()?.to_string());
             return Ok(());
         }
         // Handle Directory
@@ -121,13 +128,13 @@ impl GithubFS {
                     let tree_sha = node_json["sha"].as_str()?.to_string();
                     repo.tree.insert((repo_dir.to_string(), commit_sha.to_string()), tree_sha);
                     fs::create_dir_all(format!("{}/{}", cache_dir, node_json["path"].as_str()?))?;
-                    repo.cloned_structures.insert(repo_dir.to_string());
                 },
                 _ => {
                     eprintln!("Unknown type: {}", node_json["type"])
                 }
             }
         }
+        repo.cloned_structures.insert(repo_dir.to_string());
         Ok(())
     }
 
