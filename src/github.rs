@@ -147,6 +147,10 @@ impl GithubFS {
     // TODO: Filter out repos created after sync time.
     pub fn fill_user_repos(&self, path: &str, user: &str) -> Result<()> {
         let json = self.user_info(user)?;
+
+        if json.as_array()?.len() > 0 {
+            fs::create_dir(&path)?;
+        }
         for e in json.as_array()? {
             let name = e["name"].as_str()?;
             fs::create_dir(format!("{}/{}", path, name))?;
@@ -159,6 +163,7 @@ impl GithubFS {
         println!("Request {}", url);
         let client = reqwest::blocking::Client::new();
         let res = client.get(&url).header(reqwest::header::USER_AGENT, "Virtual Git Filesystem").header("Authorization", format!("token {}", self.token)).send()?;
+        res.error_for_status_ref()?;
         let json_str = res.text()?;
         match serde_json::from_str(&json_str) {
             Ok(json) => Ok(json),

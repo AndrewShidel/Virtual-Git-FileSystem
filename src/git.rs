@@ -40,9 +40,18 @@ impl GitFS {
             return Err(GitFSError::new("Not Found", libc::ENOENT))
         }
         if parts.len() == 2 {
+            match parts[1] {
+                // These are all common metadata files/directories. Do not try to look them up as
+                // users for performance reasons and because some of these resolve to valid Github 
+                // users.
+                // TODO: There are many more of these which can be filtered.
+                "HEAD"|".git"|"BUILD"|"WORKSPACE"|".idea" => {
+                    return Err(GitFSError::new("Not Found", libc::ENOENT));
+                },
+                _ => {},
+            }
             let path = format!("{}/repos/github.com/{}", cache_dir, parts[1]);
             if !Path::new(&path).exists() {
-                fs::create_dir(&path)?;
                 self.github.fill_user_repos(&path, parts[1])?;
             }
             return Ok(path);
