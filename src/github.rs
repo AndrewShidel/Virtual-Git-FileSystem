@@ -31,12 +31,13 @@ struct Repo {
 pub struct GithubFS {
     // Maps a repo name to a repo.
     repos: HashMap<String, Repo>,
+    fetched_users: HashSet<String>,
     pub token: String,
 }
 
 impl GithubFS {
     pub fn new() -> GithubFS {
-        GithubFS{repos: HashMap::new(), token: "".to_string()}
+        GithubFS{repos: HashMap::new(), fetched_users: HashSet::new(), token: "".to_string()}
     }
 
     fn get_repo_or_create(&mut self, repo_name: &str) -> &mut Repo {
@@ -145,9 +146,12 @@ impl GithubFS {
 
     // Creates the repo directories in the cache for a given user.
     // TODO: Filter out repos created after sync time.
-    pub fn fill_user_repos(&self, path: &str, user: &str) -> Result<()> {
+    pub fn fill_user_repos(&mut self, path: &str, user: &str) -> Result<()> {
+        if self.fetched_users.contains(user) {
+            return Ok(())
+        }
         let json = self.user_info(user)?;
-
+        self.fetched_users.insert(user.to_string());
         if json.as_array()?.len() > 0 {
             fs::create_dir(&path)?;
         }
