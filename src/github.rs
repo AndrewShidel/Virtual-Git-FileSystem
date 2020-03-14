@@ -135,6 +135,9 @@ impl GithubFS {
                 }
             }
         }
+        // Create an empty .git directory. The contents will only be created when a file within
+        // this directory is accessed.
+        fs::create_dir_all(format!("{}/.git", cache_dir))?;
         repo.cloned_structures.insert(repo_dir.to_string());
         Ok(())
     }
