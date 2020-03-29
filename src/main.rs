@@ -51,7 +51,7 @@ fn main() {
     }
     
     // Get the cache directory and the oauth token and init the filesystem.
-    let filesystem = filesystem::PassthroughFS::new(oauth::get_token().unwrap());
+    let filesystem = filesystem::PassthroughFS::new(oauth::get_token().unwrap(), args[1].to_str().unwrap().to_string());
 
     let fuse_args: Vec<&OsStr> = vec![&OsStr::new("-o"), &OsStr::new("auto_unmount")];
     fuse_mt::mount(fuse_mt::FuseMT::new(filesystem, 1), &args[2], &fuse_args).unwrap();

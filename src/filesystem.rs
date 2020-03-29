@@ -87,10 +87,11 @@ fn statfs_to_fuse(statfs: libc::statfs) -> Statfs {
 }
 
 impl PassthroughFS {
-    pub fn new(token: String) -> PassthroughFS {
+    pub fn new(token: String, cache_dir: String) -> PassthroughFS {
         let mut git = GIT.lock().unwrap();
         git.set_token(token);
-        PassthroughFS{}
+        git.set_cache_dir(cache_dir);
+        return PassthroughFS{};
     }
     fn real_path(&self, partial: &Path) -> Result<OsString, i32> {
         self.real_path_with_opts(partial, false, true)
@@ -103,7 +104,6 @@ impl PassthroughFS {
         let mut git = GIT.lock().unwrap();
         match git.clone_if_not_exist(
             partial.to_str().unwrap().to_string(),
-            String::from("/tmp/cache"),
             ignore_base,
             is_stat,
         ) {

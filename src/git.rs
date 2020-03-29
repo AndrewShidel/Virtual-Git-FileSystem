@@ -15,7 +15,8 @@ pub struct GitFS {
     github: GithubFS,
     timestamp: DateTime<Utc>,
     // The set of all git URLs which have been cloned using full_clone.
-    fully_cloned_paths: HashSet<String>
+    fully_cloned_paths: HashSet<String>,
+    cache_dir: String,
 }
 
 impl GitFS {
@@ -24,6 +25,8 @@ impl GitFS {
             github: GithubFS::new(),
             timestamp: Utc::now(),
             fully_cloned_paths: HashSet::new(),
+            // This will be filled in later by set_cache_dir.
+            cache_dir: "/dev/null".to_string(),
         }
     }
 
@@ -31,7 +34,12 @@ impl GitFS {
         self.github.token = token;
     }
 
-    pub fn clone_if_not_exist(&mut self, repo_path: String, cache_dir: String, ignore_base: bool, is_stat: bool) -> Result<String> {
+    pub fn set_cache_dir(&mut self, cache_dir: String) {
+        self.cache_dir = cache_dir;
+    }
+
+    pub fn clone_if_not_exist(&mut self, repo_path: String, ignore_base: bool, is_stat: bool) -> Result<String> {
+        let cache_dir = self.cache_dir.clone();
         let parts: Vec<&str> = repo_path.split("/").collect();
         println!("repo_path: {}, parts: {:?}", repo_path, parts);
         // For now we only support github, so all other domains should fail.
