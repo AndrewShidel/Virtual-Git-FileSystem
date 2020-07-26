@@ -11,7 +11,7 @@ extern crate rouille;
 
 mod libc_extras;
 mod libc_wrappers;
-mod filesystem
+mod filesystem;
 mod git;
 mod github;
 mod oauth;
