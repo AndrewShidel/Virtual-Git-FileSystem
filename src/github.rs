@@ -3,29 +3,23 @@ use chrono::{DateTime, Utc};
 use std::ops::{Sub};
 use time::Duration;
 use std::fs::File;
+use std::os::unix::fs::OpenOptionsExt;
 use std::io::prelude::*;
 use std::convert::TryInto;
 use std::collections::{HashMap, HashSet};
 use reqwest;
 use std::path::Path;
 use std::io;
+use std::u32;
 use crate::error::{GitFSError, Result};
 use crate::libc_extras::libc;
 
-
-fn download(remote_path: &str, local_path: &str) -> Result<()> {
-    let mut resp = reqwest::blocking::get(remote_path)?;
-    let mut out = File::create(local_path)?;
-    io::copy(&mut resp, &mut out)?;
-    Ok(())
-}
-
-
 struct Repo {
-    // Maps a (directory, commit sha) to a tree sha.
-    tree: HashMap<(String, String), String>,
+    // Maps a directory to a tree sha.
+    tree: HashMap<String, String>,
     cloned_structures: HashSet<String>,
     timestamp_to_sha: Option<(DateTime<Utc>, String)>,
+    zero_files: HashSet<String>,
 }
 
 pub struct GithubFS {
@@ -37,7 +31,11 @@ pub struct GithubFS {
 
 impl GithubFS {
     pub fn new() -> GithubFS {
-        GithubFS{repos: HashMap::new(), fetched_users: HashSet::new(), token: "".to_string()}
+        GithubFS{
+            repos: HashMap::new(),
+            fetched_users: HashSet::new(),
+            token: "".to_string(),
+        }
     }
 
     fn get_repo_or_create(&mut self, repo_name: &str) -> &mut Repo {
@@ -45,15 +43,22 @@ impl GithubFS {
             tree: HashMap::new(),
             cloned_structures: HashSet::new(),
             timestamp_to_sha: None,
+            zero_files: HashSet::new(),
         })
     }
 
+    // TODO: This will cause issues when multiple users have a repo of the same name.
     pub fn is_structure_cloned(&self, repo: &str, repo_dir: &str) -> bool {
         let repo_struct = self.repos.get(repo);
         if repo_struct.is_none() {
             return false;
         }
         repo_struct.unwrap().cloned_structures.contains(repo_dir)
+    }
+
+    // Returns an option which indicates if the repo exists.
+    pub fn mark_as_cloned(&mut self, repo: &str, repo_file: String) {
+        self.get_repo_or_create(repo).cloned_structures.insert(repo_file);
     }
 
     // Clones a specific directory inside of a repo, saving the empty files to the cache.
@@ -92,43 +97,76 @@ impl GithubFS {
     }
 
     fn create_fake_listing(&mut self, user: &str, repo_name: &str, commit_sha: &str, repo_dir: &str, cache_dir: &str) -> Result<()> {
-        // Note: This will only get the root of the repo.
-        let tree_json = self.api_call_request(&format!("repos/{}/{}/contents/{}?ref={}", user, repo_name, repo_dir, commit_sha))?;
-        let repo = self.get_repo_or_create(repo_name);
-        if tree_json.is_object() {
-            let is_msg_null = tree_json["message"].is_null();
-            if !is_msg_null {
-                return Err(GitFSError::new(&format!("Error getting contents: {}", tree_json), libc::EIO));
+        let sha;
+        {
+            sha = match repo_dir {
+                "" => commit_sha.to_string(),
+                _ => {
+                    let mut sha_result = self.get_repo_or_create(repo_name).tree.get(repo_dir);
+                    if sha_result.is_none() {
+                        let parent_dir = Path::new(repo_dir).parent().unwrap_or(Path::new("")).to_str()?;
+                        self.create_fake_listing(user, repo_name, commit_sha, parent_dir, cache_dir)?;
+                        // The directory should exist now that parent has been expanded. If it is
+                        // still None then it likely does not exist.
+                        sha_result = self.get_repo_or_create(repo_name).tree.get(repo_dir);
+                        if sha_result.is_none() {
+                            return Err(GitFSError::new("Not Found", libc::ENOENT));
+                        }
+                    }
+                    sha_result.unwrap().clone()
+                }
+            };
+            if self.get_repo_or_create(repo_name).zero_files.contains(repo_dir) {
+                let url = format!("https://api.github.com/repos/{}/{}/git/blobs/{}", user, repo_name, sha);
+                let real_path = format!("{}/{}", cache_dir, repo_dir);
+                fs::create_dir_all(Path::new(&real_path).parent()?.to_str().unwrap())?;
+                self.download(&url, &real_path)?;
+                let repo = self.get_repo_or_create(repo_name);
+                repo.zero_files.remove(repo_dir);
+                repo.cloned_structures.insert(repo_dir.to_string());
+                return Ok(());
             }
-            let path_str = format!("{}/{}", cache_dir, tree_json["path"].as_str()?);
-            let path = Path::new(&path_str);
-            fs::create_dir_all(path.parent()?.to_str().unwrap())?;
-            //let mut file = File::create(&path_str).unwrap();
-            //file.write_all(&base64::decode(tree_json["content"].as_str().unwrap()).unwrap());
-            let download_url = tree_json["download_url"].as_str()?;
-            download(download_url, &path_str)?;
-            println!("Downloaded file {} to {}", download_url, &path_str);
-            repo.cloned_structures.insert(tree_json["path"].as_str()?.to_string());
-            return Ok(());
         }
-        // Handle Directory
-        for node_json in tree_json.as_array()? {
+        let tree_json = self.api_call_request(&format!("repos/{}/{}/git/trees/{}", user, repo_name, sha))?;
+        
+        // Check for an error message.
+        let is_msg_null = tree_json["message"].is_null();
+        if !is_msg_null {
+            return Err(GitFSError::new(&format!("Error getting contents: {}", tree_json), libc::EIO));
+        }
+        
+        let repo = self.get_repo_or_create(repo_name);
+        repo.tree.insert(repo_dir.to_string(), tree_json["sha"].as_str()?.to_string());
+
+        // Iterate over each entry in the directory listing.
+        for node_json in tree_json["tree"].as_array()? {
             match node_json["type"].as_str() {
-                Some("file") => {
-                    let path = node_json["path"].as_str()?;
-                    if repo.cloned_structures.contains(path) {
-                        println!("Skipping already cloned file: {}", path);
+                // blobs are files. write empty files of the correct size as placeholders.
+                Some("blob") => {
+                    let path = Path::new(repo_dir).join(node_json["path"].as_str()?);
+                    if repo.cloned_structures.contains(path.to_str()?) {
+                        println!("Skipping already cloned file: {}", path.to_str()?);
                         continue;
                     }
-                    let mut file = File::create(format!("{}/{}", cache_dir, node_json["path"].as_str()?))?;
+                    let real_path = Path::new(cache_dir).join(path.as_path());
+                    // TODO: Use node_json["mode"].as_str() here.
+                    let mut file = fs::OpenOptions::new()
+                        .create(true)
+                        .write(true)
+                        .mode(u32::from_str_radix(node_json["mode"].as_str()?, 8).unwrap())
+                        .open(real_path.as_path())?;
                     let f_size = node_json["size"].as_i64()?;
-                    //file.write_all(&[0u8; node_json["size"].as_i64()?]);
                     file.write_all(&vec![0; f_size.try_into().unwrap()])?;
+                    repo.zero_files.insert(path.to_str()?.to_string());
+                    repo.tree.insert(path.to_str()?.to_string(), node_json["sha"].as_str()?.to_string());
                 },
-                Some("dir") => {
+                // Trees are directories. Simply create an empty directory.
+                Some("tree") => {
                     let tree_sha = node_json["sha"].as_str()?.to_string();
-                    repo.tree.insert((repo_dir.to_string(), commit_sha.to_string()), tree_sha);
-                    fs::create_dir_all(format!("{}/{}", cache_dir, node_json["path"].as_str()?))?;
+                    let path = Path::new(repo_dir).join(node_json["path"].as_str()?);
+                    repo.tree.insert(path.to_str()?.to_string(), tree_sha);
+                    // TODO: Use node_json["mode"].as_str() here.
+                    fs::create_dir_all(format!("{}/{}", cache_dir, path.to_str()?))?;
                 },
                 _ => {
                     eprintln!("Unknown type: {}", node_json["type"])
@@ -179,5 +217,18 @@ impl GithubFS {
                 Err(GitFSError::new("Unable to parse JSON", libc::EINVAL))
             }
         }
+    }
+
+    fn download(&self, remote_path: &str, local_path: &str) -> Result<()> {
+        let client = reqwest::blocking::Client::new();
+        let mut resp = client.get(remote_path)
+            .header(reqwest::header::USER_AGENT, "Virtual Git Filesystem")
+            .header("Authorization", format!("token {}", self.token))
+            .header("Accept", "application/vnd.github.VERSION.raw")
+            .send()?;
+        resp.error_for_status_ref()?;
+        let mut out = File::create(local_path)?;
+        io::copy(&mut resp, &mut out)?;
+        Ok(())
     }
 }

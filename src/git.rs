@@ -10,6 +10,7 @@ use std::fs;
 use crate::error::{Result, GitFSError};
 use crate::libc_extras::libc;
 use std::collections::{HashSet};
+use walkdir::WalkDir;
 
 pub struct GitFS {
     github: GithubFS,
@@ -96,7 +97,10 @@ impl GitFS {
         // If the path is in the .git directory, clone if needed then return the path to the real
         // file.
         if parts.len() > 3 && parts[3] == ".git" {
+            // If it is simply a stat of the .git directory, just return the path to the empty
+            // file.
             if is_stat && parts.len() == 4 {
+                fs::create_dir_all(&real_file_path)?;
                 return Ok(real_file_path);
             }
             self.full_clone(parts[1], parts[2], &url, &cache_dir, &real_repo_path)?;
@@ -106,9 +110,10 @@ impl GitFS {
         // If all we need is metadata about the file/directory, then it is sufficient to just clone the parent directory.
         if is_stat {
             let repo_parent = Path::new(&path_in_repo).parent().unwrap_or(Path::new("/")).to_str()?;
-            if !self.github.is_structure_cloned(parts[2], repo_parent) {
-                self.github.clone_dir(repo_parent, &real_repo_path, parts[1], parts[2], self.timestamp)?;
+            if self.github.is_structure_cloned(parts[2], repo_parent) || self.github.is_structure_cloned(parts[2], &path_in_repo) {
+                return Ok(real_file_path)
             }
+            self.github.clone_dir(repo_parent, &real_repo_path, parts[1], parts[2], self.timestamp)?;
             return Ok(real_file_path)
         }
         if self.github.is_structure_cloned(parts[2], &path_in_repo) {
@@ -116,10 +121,6 @@ impl GitFS {
         }
         self.github.clone_dir(&path_in_repo, &real_repo_path, parts[1], parts[2], self.timestamp)?;
         Ok(real_file_path)
-        //match RepoBuilder::new().clone(&url, Path::new(&real_repo_path)) {
-        //    Ok(_r) => Ok(real_file_path),
-        //    Err(e) => Err(std::io::Error::new(std::io::ErrorKind::NotFound, e))
-        //}
     }
 
     fn full_clone(&mut self, user: &str, repo: &str, url: &str, cache_dir: &str, repo_path: &str) -> Result<()> {
@@ -129,7 +130,7 @@ impl GitFS {
         }
         let mut child = Command::new("git")
             .arg("clone")
-            .arg("--no-checkout")
+            //.arg("--no-checkout")
             .arg(url)
             .arg(&repo_clone_dir)
             .spawn()?;
@@ -137,11 +138,26 @@ impl GitFS {
         let tmp_repo_git_dir = format!("{}/.git", &repo_clone_dir);
         let real_repo_git_dir = format!("{}/.git", repo_path);
         fs::rename(tmp_repo_git_dir, real_repo_git_dir)?;
-        Command::new("git")
-            .current_dir(repo_path)
-            .arg("reset")
-            .arg("HEAD")
-            .spawn()?.wait()?;
+        for entry_result in WalkDir::new(&repo_clone_dir) {
+            let entry = entry_result.unwrap(); // TODO: Do not use unwrap.
+            let entry_path = entry.path();
+            let relative_path = entry_path.strip_prefix(&repo_clone_dir).unwrap_or(entry_path).to_str()?;
+            println!("path = {}, relative_path = {}", entry_path.display(), relative_path);
+            if !self.github.is_structure_cloned(repo, relative_path) {
+                if entry.file_type().is_dir() {
+                    fs::create_dir_all(format!("{}/{}", repo_path, relative_path))?;
+                } else {
+                    fs::create_dir_all(Path::new(&format!("{}/{}", repo_path, relative_path)).parent()?)?;
+                    println!("Copying path = {}, relative_path = {}", entry_path.display(), relative_path);
+                    fs::rename(entry_path, format!("{}/{}", repo_path, relative_path))?;
+                }
+                // Mark the file as cached.
+                self.github.mark_as_cloned(repo,  relative_path.to_string());
+            } else {
+                println!("NOT copying path = {}, relative_path = {}", entry_path.display(), relative_path);
+            }
+        }
+        println!("Everything was copied.");
         self.fully_cloned_paths.insert(url.to_string());
         return Ok(());
     }

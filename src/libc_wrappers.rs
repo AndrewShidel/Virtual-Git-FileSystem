@@ -87,7 +87,6 @@ pub fn lstat(path: OsString) -> Result<libc::stat64, libc::c_int> {
     if -1 == unsafe { libc::lstat64(path_c.as_ptr(), &mut buf) } {
         return Err(io::Error::last_os_error().raw_os_error().unwrap());
     }
-
     Ok(buf)
 }
 
@@ -96,7 +95,6 @@ pub fn fstat(fd: u64) -> Result<libc::stat64, libc::c_int> {
     if -1 == unsafe { libc::fstat64(fd as libc::c_int, &mut buf) } {
         return Err(io::Error::last_os_error().raw_os_error().unwrap());
     }
-
     Ok(buf)
 }
 
