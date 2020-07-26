@@ -1,4 +1,4 @@
-VG (**V**irtual **G**it filesystem) presents git repositories as files/directories by running a custom FUSE filesystem. It is useful for browsing code and depending on other repositories.
+GitFS presents git repositories as files/directories by running a custom FUSE filesystem. It is useful for browsing code and depending on other repositories.
 
 ## Installation
 
@@ -18,11 +18,11 @@ Where `cache_dir` is the directory to store cached files and directories and `mo
 
 The first time this is run the Oauth flow is initiated and a browser tab will be opened so that you can authorize. This is needed to access private repositories and to grant higher API request limits.
 
-If you have already run VG, you may have to run `umount <mountpoint>` before running again.
+If you have already run GitFS, you may have to run `umount <mountpoint>` before running again.
 
 ## Usage
 
-VG can be used like any other directory. It has the following structure:
+GitFS can be used like any other directory. It has the following structure:
 
 ```
 <mountpoint>
