@@ -68,7 +68,7 @@ pub mod libc {
     fn timespec_to_timeval(timespec: &timespec) -> timeval {
         timeval {
             tv_sec: timespec.tv_sec,
-            tv_usec: timespec.tv_nsec as suseconds_t * 1000,
+            tv_usec: (timespec.tv_nsec * 1000) as suseconds_t,
         }
     }
 
