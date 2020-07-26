@@ -39,7 +39,7 @@ fn main() {
     let args: Vec<OsString> = env::args_os().collect();
 
     if args.len() != 3 {
-        eprintln!("usage: {} <target> <mountpoint>", &env::args().next().unwrap());
+        eprintln!("usage: {} <cache_dir> <mountpoint>", &env::args().next().unwrap());
         ::std::process::exit(1);
     }
 
