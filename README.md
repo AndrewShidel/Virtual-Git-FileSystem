@@ -50,3 +50,6 @@ This project is currently in the very early stages. There are still many known b
 * Ability to create multiple clients.
   * Ability to sync clients to various points in history.
 * Automount the filesystem.
+* Windows support (via Docker/VM).
+* Graceful stop/resume.
+* Remove caches and state.
